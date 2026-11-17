@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Drift Master 3D</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { overflow:hidden; background:#000; font-family:'Segoe UI',sans-serif; }
+  #game { width:100vw; height:100vh; display:block; }
+  #hud {
+    position:fixed; top:15px; left:15px; color:#0ff; font-size:18px;
+    text-shadow:0 0 10px #0ff; pointer-events:none; z-index:10;
+  }
+  #hud div { margin-bottom:6px; }
+  #combo {
+    position:fixed; top:50%; left:50%; transform:translate(-50%,-50%) scale(1);
+    font-size:64px; font-weight:bold; color:#ff0; text-shadow:0 0 30px #ff0;
+    pointer-events:none; z-index:10; opacity:0; transition:opacity 0.3s, transform 0.3s;
+  }
+  #driftBar {
+    position:fixed; bottom:25px; left:50%; transform:translateX(-50%);
+    width:300px; height:18px; background:rgba(0,0,0,0.6);
+    border:2px solid #f0f; border-radius:10px; overflow:hidden; z-index:10;
+  }
+  #driftFill { height:100%; width:0%; background:linear-gradient(90deg,#0ff,#f0f,#f00); transition:width 0.1s; }
+  #nitroBar {
+    position:fixed; bottom:55px; left:50%; transform:translateX(-50%);
+    width:300px; height:10px; background:rgba(0,0,0,0.6);
+    border:2px solid #0ff; border-radius:10px; overflow:hidden; z-index:10;
+  }
+  #nitroFill { height:100%; width:50%; background:linear-gradient(90deg,#0ff,#0f0); transition:width 0.1s; }
+  #controls {
+    position:fixed; bottom:20px; right:20px; z-index:10;
+    display:flex; flex-direction:column; gap:10px; align-items:flex-end;
+  }
+  .ctrl-btn {
+    width:70px; height:70px; border-radius:50%;
+    background:rgba(0,255,255,0.15); border:2px solid #0ff;
+    color:#0ff; font-size:20px; font-weight:bold;
+    touch-action:none; user-select:none; cursor:pointer;
+  }
+  .ctrl-btn:active, .ctrl-btn.active { background:rgba(0,255,255,0.5); }
+  #steerBtns { display:flex; gap:10px; }
+  #driftBtn { border-color:#f0f; color:#f0f; background:rgba(255,0,255,0.15); }
+  #driftBtn:active, #driftBtn.active { background:rgba(255,0,255,0.6); }
+  #overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.88);
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    z-index:100; color:#fff; text-align:center; padding:20px;
+  }
+  #overlay h1 { font-size:48px; color:#0ff; text-shadow:0 0 20px #0ff; margin-bottom:20px; }
+  #overlay p { font-size:17px; margin-bottom:25px; color:#aaa; max-width:600px; line-height:1.6; }
+  #overlay button {
+    padding:15px 50px; font-size:20px; background:linear-gradient(90deg,#0ff,#f0f);
+    border:none; border-radius:30px; color:#000; font-weight:bold; cursor:pointer;
+  }
+  #overlay button:hover { transform:scale(1.05); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div>🏆 SCORE: <span id="score">0</span></div>
+  <div>🔥 COMBO: x<span id="comboMul">1</span></div>
+  <div>🚗 SPEED: <span id="speed">0</span> km/h</div>
+  <div>💨 DRIFT: <span id="driftState">—</span></div>
+</div>
+<div id="combo"></div>
+<div id="nitroBar"><div id="nitroFill"></div></div>
+<div id="driftBar"><div id="driftFill"></div></div>
+<div id="controls">
+  <div id="steerBtns">
+    <button class="ctrl-btn" id="btnLeft">◀</button>
+    <button class="ctrl-btn" id="btnRight">▶</button>
+  </div>
+  <button class="ctrl-btn" id="driftBtn">DRIFT</button>
+</div>
+<div id="overlay">
+  <h1>DRIFT MASTER 3D</h1>
+  <p>
+    <b>W / ↑</b> — gaz &nbsp;|&nbsp; <b>S / ↓</b> — tormoz &nbsp;|&nbsp;
+    <b>← →</b> — burilish<br>
+    <b>SPACE</b> — drift &nbsp;|&nbsp; <b>SHIFT</b> — nitro<br><br>
+    Drift qiling, combo to'plang, eng yuqori ball oling!
+  </p>
+  <button id="startBtn">START DRIFT</button>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ================= SETUP =================
+const canvas = document.getElementById('game');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050510);
+scene.fog = new THREE.Fog(0x050510, 80, 260);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 1000);
+camera.position.set(0, 6, 12);
+
+// ================= LIGHTS =================
+scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.position.set(30, 50, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -80;
+sun.shadow.camera.right = 80;
+sun.shadow.camera.top = 80;
+sun.shadow.camera.bottom = -80;
+scene.add(sun);
+
+const neonLight = new THREE.PointLight(0x00ffff, 2, 40);
+scene.add(neonLight);
+
+// ================= GROUND =================
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 400),
+  new THREE.MeshStandardMaterial({ color:0x0b0b1a, metalness:0.2, roughness:0.9 })
+);
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(400, 80, 0x00ffff, 0x1a1a3a);
+grid.position.y = 0.01;
+scene.add(grid);
+
+// ================= CONES =================
+const coneGeo = new THREE.ConeGeometry(0.4, 1.2, 12);
+const coneMat = new THREE.MeshStandardMaterial({ color:0xff6600, emissive:0xff3300, emissiveIntensity:0.3 });
+for (let i = 0; i < 40; i++) {
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  const a = Math.random() * Math.PI * 2;
+  const d = 15 + Math.random() * 50;
+  cone.position.set(Math.cos(a)*d, 0.6, Math.sin(a)*d);
+  cone.castShadow = true;
+  scene.add(cone);
+}
+
+// neon pillars
+for (let i = 0; i < 20; i++) {
+  const a = (i/20) * Math.PI * 2;
+  const r = 70;
+  const p = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 8, 1),
+    new THREE.MeshStandardMaterial({
+      color: i%2 ? 0xff00ff : 0x00ffff,
+      emissive: i%2 ? 0xff00ff : 0x00ffff,
+      emissiveIntensity: 0.8
+    })
+  );
+  p.position.set(Math.cos(a)*r, 4, Math.sin(a)*r);
+  scene.add(p);
+}
+
+// ================= CAR =================
+const car = new THREE.Group();
+const body = new THREE.Mesh(
+  new THREE.BoxGeometry(1.9, 0.55, 4.2),
+  new THREE.MeshStandardMaterial({ color:0x00ffff, metalness:0.9, roughness:0.15 })
+);
+body.position.y = 0.55;
+body.castShadow = true;
+car.add(body);
+
+const cabin = new THREE.Mesh(
+  new THREE.BoxGeometry(1.4, 0.5, 1.8),
+  new THREE.MeshStandardMaterial({ color:0x111122, metalness:0.9, roughness:0.1 })
+);
+cabin.position.set(0, 1.05, -0.2);
+cabin.castShadow = true;
+car.add(cabin);
+
+const spoiler = new THREE.Mesh(
+  new THREE.BoxGeometry(1.9, 0.1, 0.4),
+  new THREE.MeshStandardMaterial({ color:0xff00ff, metalness:0.9 })
+);
+spoiler.position.set(0, 1.0, -1.9);
+car.add(spoiler);
+
+const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.32, 16);
+const wheelMat = new THREE.MeshStandardMaterial({ color:0x111111, roughness:0.7 });
+const wheels = [];
+[[-0.95,0.42,1.4],[0.95,0.42,1.4],[-0.95,0.42,-1.4],[0.95,0.42,-1.4]].forEach(([x,y,z], i) => {
+  const w = new THREE.Mesh(wheelGeo, wheelMat);
+  w.rotation.z = Math.PI/2;
+  w.position.set(x,y,z);
+  w.castShadow = true;
+  w.userData.isFront = i < 2;
+  car.add(w);
+  wheels.push(w);
+});
+
+// headlights
+const hlMat = new THREE.MeshBasicMaterial({ color:0xffffaa });
+const hl1 = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.15,0.1), hlMat);
+hl1.position.set(-0.6, 0.55, 2.1);
+const hl2 = hl1.clone(); hl2.position.x = 0.6;
+car.add(hl1, hl2);
+
+// taillights
+const tlMat = new THREE.MeshBasicMaterial({ color:0xff0000 });
+const tl1 = new THREE.Mesh(new THREE.BoxGeometry(0.4,0.15,0.1), tlMat);
+tl1.position.set(-0.6, 0.55, -2.1);
+const tl2 = tl1.clone(); tl2.position.x = 0.6;
+car.add(tl1, tl2);
+
+// underglow
+const underglow = new THREE.PointLight(0x00ffff, 1.5, 6);
+underglow.position.set(0, 0.2, 0);
+car.add(underglow);
+
+scene.add(car);
+car.position.set(0, 0, 0);
+
+// ================= SMOKE =================
+const smokeParticles = [];
+const smokeGeo = new THREE.SphereGeometry(0.25, 6, 6);
+
+function spawnSmoke(pos) {
+  const mat = new THREE.MeshBasicMaterial({ color:0xcccccc, transparent:true, opacity:0.5 });
+  const p = new THREE.Mesh(smokeGeo, mat);
+  p.position.copy(pos);
+  p.position.y = 0.3;
+  p.userData.life = 1.0;
+  p.userData.vel = new THREE.Vector3(
+    (Math.random()-0.5)*0.15, 0.15 + Math.random()*0.15, (Math.random()-0.5)*0.15
+  );
+  p.userData.scale = 1;
+  scene.add(p);
+  smokeParticles.push(p);
+}
+
+function updateSmoke(dt) {
+  for (let i = smokeParticles.length-1; i >= 0; i--) {
+    const p = smokeParticles[i];
+    p.position.add(p.userData.vel);
+    p.userData.vel.y -= 0.01;
+    p.userData.life -= dt * 1.5;
+    p.userData.scale += dt * 3;
+    p.scale.setScalar(p.userData.scale);
+    p.material.opacity = Math.max(0, p.userData.life * 0.5);
+    if (p.userData.life <= 0) {
+      scene.remove(p);
+      smokeParticles.splice(i, 1);
+    }
+  }
+}
+
+// ================= STATE =================
+const state = {
+  running: false,
+  pos: new THREE.Vector3(0, 0, 0),
+  vel: new THREE.Vector3(0, 0, 0),
+  heading: 0,        // radians, car facing direction
+  steer: 0,          // -1..1 input
+  speed: 0,          // current speed magnitude
+  drifting: false,
+  driftScore: 0,
+  totalScore: 0,
+  combo: 1,
+  comboTime: 0,
+  nitro: 50,
+  nitroActive: false,
+  wheelSpin: 0,
+};
+
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') state.drifting = true;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') state.nitroActive = true;
+});
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'Space') state.drifting = false;
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') state.nitroActive = false;
+});
+
+// mobile buttons
+const btnLeft = document.getElementById('btnLeft');
+const btnRight = document.getElementById('btnRight');
+const btnDrift = document.getElementById('driftBtn');
+
+function bindHold(btn, onDown, onUp) {
+  btn.addEventListener('touchstart', e=>{e.preventDefault(); onDown(); btn.classList.add('active');});
+  btn.addEventListener('touchend', e=>{e.preventDefault(); onUp(); btn.classList.remove('active');});
+  btn.addEventListener('touchcancel', e=>{e.preventDefault(); onUp(); btn.classList.remove('active');});
+  btn.addEventListener('mousedown', e=>{e.preventDefault(); onDown(); btn.classList.add('active');});
+  btn.addEventListener('mouseup', e=>{e.preventDefault(); onUp(); btn.classList.remove('active');});
+  btn.addEventListener('mouseleave', e=>{onUp(); btn.classList.remove('active');});
+}
+bindHold(btnLeft, ()=>keys['ArrowLeft']=true, ()=>keys['ArrowLeft']=false);
+bindHold(btnRight, ()=>keys['ArrowRight']=true, ()=>keys['ArrowRight']=false);
+bindHold(btnDrift, ()=>state.drifting=true, ()=>state.drifting=false);
+
+// ================= PHYSICS =================
+const clock = new THREE.Clock();
+const tmpForward = new THREE.Vector3();
+const tmpRight = new THREE.Vector3();
+const tmpWheel = new THREE.Vector3();
+
+const CFG = {
+  maxSpeed: 0.45,       // units per frame at 60fps
+  accel: 0.010,
+  brake: 0.025,
+  friction: 0.004,
+  reverseMax: 0.15,
+  steerRate: 0.06,      // radians per frame at full speed
+  driftSteerMul: 1.7,
+  gripNormal: 0.90,     // velocity alignment per frame (0..1)
+  gripDrift: 0.985,     // during drift, keep more of old velocity → slip
+};
+
+function update(dt) {
+  if (!state.running) return;
+
+  const frameScale = dt * 60; // normalize to 60fps
+  const throttle = (keys['KeyW'] || keys['ArrowUp']) ? 1 : 0;
+  const brakeIn = (keys['KeyS'] || keys['ArrowDown']) ? 1 : 0;
+  const steerIn = (keys['ArrowLeft'] ? -1 : 0) + (keys['ArrowRight'] ? 1 : 0);
+
+  // ---- smooth steer input ----
+  state.steer += (steerIn - state.steer) * 0.15 * frameScale;
+
+  // ---- forward/right vectors ----
+  tmpForward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+  tmpRight.set(Math.cos(state.heading), 0, -Math.sin(state.heading));
+
+  // current forward speed (scalar)
+  const fwdSpeed = state.vel.dot(tmpForward);
+
+  // ---- acceleration ----
+  if (throttle) {
+    state.vel.addScaledVector(tmpForward, CFG.accel * frameScale);
+  }
+  if (brakeIn) {
+    if (fwdSpeed > 0.01) {
+      state.vel.addScaledVector(tmpForward, -CFG.brake * frameScale);
+    } else {
+      // reverse
+      state.vel.addScaledVector(tmpForward, -CFG.accel * 0.6 * frameScale);
+    }
+  }
+
+  // ---- nitro ----
+  if (state.nitroActive && state.nitro > 0) {
+    state.vel.addScaledVector(tmpForward, 0.015 * frameScale);
+    state.nitro = Math.max(0, state.nitro - 40 * dt);
+  } else if (!state.nitroActive) {
+    state.nitro = Math.min(100, state.nitro + 4 * dt);
+  }
+
+  // ---- friction (engine braking when no throttle) ----
+  if (!throttle && !brakeIn) {
+    const f = Math.max(0, 1 - CFG.friction * frameScale);
+    state.vel.multiplyScalar(f);
+  }
+
+  // ---- speed cap ----
+  const maxSp = CFG.maxSpeed + (state.nitroActive && state.nitro > 0 ? 0.2 : 0);
+  const sp = state.vel.length();
+  if (sp > maxSp) state.vel.setLength(maxSp);
+  state.speed = state.vel.length();
+
+  // ---- steering / heading change ----
+  // only steer when moving
+  const moveFactor = Math.min(1, state.speed / 0.08);
+  let turnRate = state.steer * CFG.steerRate * moveFactor;
+  if (state.drifting && state.speed > 0.08) {
+    turnRate *= CFG.driftSteerMul;
+  }
+  state.heading += turnRate * frameScale;
+
+  // ---- GRIP: align velocity to new heading ----
+  // Compute how much of the velocity we keep in forward direction
+  tmpForward.set(Math.sin(state.heading), 0, Math.cos(state.heading));
+  tmpRight.set(Math.cos(state.heading), 0, -Math.sin(state.heading));
+
+  const newFwd = state.vel.dot(tmpForward);
+  const newRight = state.vel.dot(tmpRight);
+
+  // grip factor: how strongly lateral velocity is killed
+  const grip = state.drifting ? CFG.gripDrift : CFG.gripNormal;
+
+  // new velocity = forward component (kept) + lateral component (reduced by grip)
+  const lateralKeep = Math.pow(grip, frameScale);
+  state.vel.copy(tmpForward).multiplyScalar(newFwd);
+  state.vel.addScaledVector(tmpRight, newRight * lateralKeep);
+
+  // ---- position update ----
+  state.pos.addScaledVector(state.vel, frameScale);
+
+  // soft boundary (arena radius 55)
+  const distC = Math.hypot(state.pos.x, state.pos.z);
+  if (distC > 55) {
+    const nx = state.pos.x / distC, nz = state.pos.z / distC;
+    state.pos.x = nx * 55;
+    state.pos.z = nz * 55;
+    // reflect velocity inward
+    const dot = state.vel.x*nx + state.vel.z*nz;
+    state.vel.x -= 1.5 * dot * nx;
+    state.vel.z -= 1.5 * dot * nz;
+    state.vel.multiplyScalar(0.5);
+  }
+
+  // ---- apply to car mesh ----
+  car.position.set(state.pos.x, 0, state.pos.z);
+  car.rotation.y = state.heading;
+
+  // ---- wheel visuals ----
+  state.wheelSpin += state.speed * 3 * frameScale;
+  wheels.forEach(w => {
+    if (w.userData.isFront) {
+      w.rotation.y = state.steer * 0.5;
+      w.rotation.x = state.wheelSpin;
+    } else {
+      w.rotation.x = state.wheelSpin;
+    }
+  });
+
+  // ---- drift detection ----
+  const slip = Math.atan2(Math.abs(newRight), Math.abs(newFwd) + 0.001);
+  const isDrifting = state.drifting && state.speed > 0.12 && slip > 0.12;
+
+  if (isDrifting) {
+    const points = slip * state.speed * 400 * dt;
+    state.driftScore += points;
+    state.comboTime = 1.2;
+    state.combo = Math.min(10, 1 + Math.floor(state.driftScore / 200));
+
+    if (Math.random() < 0.7) {
+      tmpWheel.set(-0.95, 0.1, -1.4).applyAxisAngle(new THREE.Vector3(0,1,0), state.heading).add(car.position);
+      spawnSmoke(tmpWheel);
+      tmpWheel.set(0.95, 0.1, -1.4).applyAxisAngle(new THREE.Vector3(0,1,0), state.heading).add(car.position);
+      spawnSmoke(tmpWheel);
+    }
+  } else {
+    if (state.comboTime > 0) {
+      state.comboTime -= dt;
+      if (state.comboTime <= 0) {
+        if (state.driftScore > 1) {
+          const gained = Math.floor(state.driftScore * state.combo);
+          state.totalScore += gained;
+          showComboPopup(gained, state.combo);
+          state.driftScore = 0;
+          state.combo = 1;
+        }
+      }
+    }
+    if (state.comboTime <= 0) {
+      state.driftScore = 0;
+      state.combo = 1;
+    }
+  }
+
+  // ---- camera follow ----
+  const camOffset = new THREE.Vector3(0, 5.5, -11)
+    .applyAxisAngle(new THREE.Vector3(0,1,0), state.heading);
+  const camTarget = car.position.clone().add(camOffset);
+  camera.position.lerp(camTarget, 0.12);
+  const lookAt = car.position.clone();
+  lookAt.y = 1.2;
+  camera.lookAt(lookAt);
+
+  // lights
+  neonLight.position.copy(car.position).add(new THREE.Vector3(0, 5, 0));
+  underglow.color.setHSL((performance.now()*0.0004) % 1, 1, 0.5);
+
+  // ---- HUD ----
+  document.getElementById('speed').textContent = Math.round(state.speed * 400);
+  document.getElementById('score').textContent = state.totalScore + Math.floor(state.driftScore);
+  document.getElementById('comboMul').textContent = state.combo;
+  document.getElementById('driftState').textContent = isDrifting ? 'YES 🔥' : (state.drifting ? 'slip…' : '—');
+  document.getElementById('driftFill').style.width = Math.min(100, state.driftScore/10) + '%';
+  document.getElementById('nitroFill').style.width = state.nitro + '%';
+}
+
+function showComboPopup(pts, mul) {
+  const el = document.getElementById('combo');
+  el.textContent = `+${pts} x${mul}`;
+  el.style.opacity = 1;
+  el.style.transform = 'translate(-50%,-50%) scale(1.4)';
+  setTimeout(() => {
+    el.style.opacity = 0;
+    el.style.transform = 'translate(-50%,-50%) scale(1)';
+  }, 700);
+}
+
+// ================= LOOP =================
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  update(dt);
+  updateSmoke(dt);
+  renderer.render(scene, camera);
+}
+animate();
+
+// ================= START =================
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.add('hidden');
+  state.running = true;
+  state.pos.set(0, 0, 0);
+  state.vel.set(0, 0, 0);
+  state.heading = 0;
+  state.steer = 0;
+  state.speed = 0;
+  state.totalScore = 0;
+  state.driftScore = 0;
+  state.combo = 1;
+  state.nitro = 50;
+  car.position.set(0, 0, 0);
+  car.rotation.y = 0;
+});
+
+// ================= RESIZE =================
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
